@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Escaneador de Códigos com ZXing</title>
-    <!-- Incluindo a biblioteca ZXing via CDN -->
-    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <title>Escaneador de Códigos de Barras</title>
+    <!-- Incluindo a biblioteca QuaggaJS via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -47,69 +47,70 @@
     <input type="text" id="result" placeholder="Resultado aparecerá aqui" readonly>
     <!-- Botão para iniciar o escaneamento -->
     <button id="startButton">Iniciar Escaneamento</button>
-    <!-- Vídeo para exibir a câmera -->
-    <video id="video" muted playsinline></video>
+    <!-- Div para o vídeo -->
+    <div id="video" style="position: relative;"></div>
 
-    <!-- Configuração do PWA -->
-    <link rel="manifest" href="manifest.json">
     <script>
-        // Registro do Service Worker para PWA
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
-                .then(() => console.log('Service Worker registrado'))
-                .catch(err => console.error('Erro ao registrar Service Worker:', err));
-        }
-
-        // JavaScript para o escaneamento
         document.addEventListener('DOMContentLoaded', () => {
-            const video = document.getElementById('video');
             const resultInput = document.getElementById('result');
             const startButton = document.getElementById('startButton');
-            let codeReader = null;
-            let stream = null;
+            let scanning = false;
 
             // Função para parar o escaneamento
             function stopScanning() {
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                    stream = null;
+                if (scanning) {
+                    Quagga.stop();
+                    scanning = false;
                 }
             }
 
             // Função para iniciar o escaneamento
-            async function startScanning() {
-                stopScanning(); // Para qualquer escaneamento ativo
+            function startScanning() {
+                if (scanning) return;
+                scanning = true;
 
-                codeReader = new ZXing.BrowserMultiFormatReader();
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'environment' } // Usa a câmera traseira
-                    });
-                    video.srcObject = stream;
-                    video.play();
+                // Configuração do QuaggaJS
+                Quagga.init({
+                    inputStream: {
+                        name: "Live",
+                        type: "LiveStream",
+                        target: document.querySelector('#video'),
+                        constraints: {
+                            facingMode: "environment" // Usa a câmera traseira
+                        }
+                    },
+                    decoder: {
+                        readers: [
+                            "code_39_reader", // Para Code 39
+                            "code_128_reader", // Para Code 128
+                            "ean_reader", // Para EAN-13, EAN-8
+                            "upc_reader" // Para UPC-A, UPC-E
+                        ]
+                    },
+                    locate: true
+                }, function(err) {
+                    if (err) {
+                        console.error('Erro ao iniciar Quagga:', err);
+                        alert('Não foi possível iniciar o escaneador. Verifique as permissões da câmera.');
+                        scanning = false;
+                        return;
+                    }
+                    Quagga.start();
 
                     // Adiciona o quadrado de alinhamento
                     if (!document.querySelector('.scan-area')) {
                         const scanArea = document.createElement('div');
                         scanArea.className = 'scan-area';
-                        video.parentNode.insertBefore(scanArea, video.nextSibling);
+                        document.querySelector('#video').appendChild(scanArea);
                     }
+                });
 
-                    // Inicia a leitura
-                    codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
-                        if (result) {
-                            resultInput.value = result.text;
-                            stopScanning();
-                            codeReader.reset();
-                        }
-                        if (err && !(err instanceof ZXing.NotFoundException)) {
-                            console.error('Erro no escaneamento:', err);
-                        }
-                    });
-                } catch (err) {
-                    console.error('Erro ao acessar a câmera:', err);
-                    alert('Não foi possível acessar a câmera. Verifique as permissões.');
-                }
+                // Evento de detecção
+                Quagga.onDetected(function(data) {
+                    const code = data.codeResult.code;
+                    resultInput.value = code;
+                    stopScanning();
+                });
             }
 
             // Evento do botão

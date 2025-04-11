@@ -3,110 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Escaneador de Códigos com Scandit</title>
-    <!-- Incluindo a biblioteca Scandit via CDN -->
-    <script src="https://cdn.scandit.com/sdk/10.x/scandit-web.min.js"></script>
+    <title>Escaneador de Códigos com ZXing</title>
+    <!-- Incluindo a biblioteca ZXing via CDN -->
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
-        /* Estilo básico para o scanner e o campo de texto */
-        #scanner {
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        #video {
             width: 100%;
-            height: 400px;
+            max-width: 500px;
+            height: auto;
             position: relative;
         }
         #result {
             width: 90%;
-            margin: 10px;
+            margin: 10px auto;
             padding: 10px;
+            font-size: 16px;
         }
-        #scanButton {
-            margin: 10px;
+        #startButton {
             padding: 10px 20px;
+            font-size: 16px;
+            margin: 10px;
+        }
+        /* Quadrado de alinhamento */
+        .scan-area {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 20%;
+            border: 2px dashed red;
+            pointer-events: none;
         }
     </style>
 </head>
 <body>
-    <!-- Campo de texto para exibir o resultado -->
-    <input type="text" id="result" placeholder="Digite ou escaneie um código">
+    <h2>Escaneador de Códigos de Barras</h2>
+    <!-- Campo de texto para o resultado -->
+    <input type="text" id="result" placeholder="Resultado aparecerá aqui" readonly>
     <!-- Botão para iniciar o escaneamento -->
-    <button id="scanButton">Escanear</button>
-    <!-- Div para o escaneador Scandit -->
-    <div id="scanner"></div>
+    <button id="startButton">Iniciar Escaneamento</button>
+    <!-- Vídeo para exibir a câmera -->
+    <video id="video" muted playsinline></video>
 
-    <!-- JavaScript embutido -->
+    <!-- Configuração do PWA -->
+    <link rel="manifest" href="manifest.json">
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const resultInput = document.getElementById('result');
-            const scanButton = document.getElementById('scanButton');
-            let barcodePicker = null;
+        // Registro do Service Worker para PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+                .then(() => console.log('Service Worker registrado'))
+                .catch(err => console.error('Erro ao registrar Service Worker:', err));
+        }
 
-            // Configuração inicial do Scandit
-            ScanditSDK.configure("SUA_CHAVE_AQUI", {
-                engineLocation: "https://cdn.scandit.com/sdk/10.x/"
-            }).then(() => {
-                console.log("Scandit configurado com sucesso.");
-            }).catch(err => {
-                console.error("Erro na configuração do Scandit:", err);
-                alert("Erro ao configurar o Scandit. Verifique a chave de licença.");
-            });
+        // JavaScript para o escaneamento
+        document.addEventListener('DOMContentLoaded', () => {
+            const video = document.getElementById('video');
+            const resultInput = document.getElementById('result');
+            const startButton = document.getElementById('startButton');
+            let codeReader = null;
+            let stream = null;
 
             // Função para parar o escaneamento
             function stopScanning() {
-                if (barcodePicker) {
-                    barcodePicker.destroy();
-                    barcodePicker = null;
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
                 }
             }
 
             // Função para iniciar o escaneamento
             async function startScanning() {
-                stopScanning(); // Garante que não há escaneamento ativo
+                stopScanning(); // Para qualquer escaneamento ativo
 
+                codeReader = new ZXing.BrowserMultiFormatReader();
                 try {
-                    // Cria o BarcodePicker
-                    barcodePicker = await ScanditSDK.BarcodePicker.create(document.getElementById("scanner"), {
-                        playSoundOnScan: true, // Toca som ao escanear
-                        vibrateOnScan: true, // Vibra ao escanear (se suportado)
-                        scanSettings: new ScanditSDK.ScanSettings({
-                            enabledSymbologies: [
-                                "ean13", "ean8", "upca", "upce", "code128", "code39", "code93", "qr"
-                            ], // Prioriza códigos de barras 1D, inclui QR
-                            codeDuplicateFilter: 1000 // Evita leituras duplicadas
-                        }),
-                        guiStyle: ScanditSDK.BarcodePicker.GuiStyle.VIEWFINDER, // Mostra a mira
-                        viewfinder: {
-                            style: "rectangular", // Quadrado para alinhamento
-                            width: 0.8, // Largura relativa ao scanner (80%)
-                            height: 0.3 // Altura relativa, adequada para códigos de barras
-                        }
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment' } // Usa a câmera traseira
                     });
+                    video.srcObject = stream;
+                    video.play();
 
-                    // Define preferência para câmera traseira
-                    const devices = await ScanditSDK.CameraAccess.getCameras();
-                    const rearCamera = devices.find(device => device.label.toLowerCase().includes("back") || device.label.toLowerCase().includes("rear"));
-                    if (rearCamera) {
-                        barcodePicker.setCamera(rearCamera);
+                    // Adiciona o quadrado de alinhamento
+                    if (!document.querySelector('.scan-area')) {
+                        const scanArea = document.createElement('div');
+                        scanArea.className = 'scan-area';
+                        video.parentNode.insertBefore(scanArea, video.nextSibling);
                     }
 
-                    // Evento de escaneamento
-                    barcodePicker.on("scan", (scanResult) => {
-                        const barcodeData = scanResult.barcodes[0].data;
-                        resultInput.value = barcodeData;
-                        stopScanning(); // Para o escaneamento após detectar
+                    // Inicia a leitura
+                    codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
+                        if (result) {
+                            resultInput.value = result.text;
+                            stopScanning();
+                            codeReader.reset();
+                        }
+                        if (err && !(err instanceof ZXing.NotFoundException)) {
+                            console.error('Erro no escaneamento:', err);
+                        }
                     });
-
-                    // Lida com erros
-                    barcodePicker.on("scanError", (error) => {
-                        console.error("Erro no escaneamento:", error);
-                    });
-
                 } catch (err) {
-                    console.error("Erro ao iniciar o escaneador:", err);
-                    alert("Não foi possível iniciar o escaneador. Verifique as permissões da câmera.");
+                    console.error('Erro ao acessar a câmera:', err);
+                    alert('Não foi possível acessar a câmera. Verifique as permissões.');
                 }
             }
 
             // Evento do botão
-            scanButton.addEventListener('click', startScanning);
+            startButton.addEventListener('click', startScanning);
         });
     </script>
 </body>

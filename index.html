@@ -2,29 +2,47 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Scanner de Código de Barras e QR</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
     <style>
-        body {
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
             font-family: Arial, sans-serif;
-            max-width: 500px;
-            margin: 0 auto;
-            padding: 20px;
+        }
+        
+        .container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
         
         .input-container {
-            margin-bottom: 20px;
+            padding: 10px;
+            display: flex;
+            background-color: #f0f0f0;
+            z-index: 100;
         }
         
         input {
+            flex: 1;
             padding: 10px;
-            width: 70%;
+            margin-right: 10px;
+            border: 1px solid #ddd;
         }
         
         button {
-            padding: 10px;
+            padding: 10px 15px;
             background-color: #007bff;
             color: white;
             border: none;
@@ -33,14 +51,17 @@
         
         #scanner-container {
             position: relative;
+            flex: 1;
             width: 100%;
-            max-width: 500px;
-            overflow: hidden;
+            height: calc(100% - 60px);
             display: none;
+            background-color: #000;
         }
         
         #video {
             width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
         
         #canvas {
@@ -60,39 +81,58 @@
         }
         
         .scanner-frame {
-            width: 200px;
-            height: 200px;
-            border: 2px solid #ff0000;
-            border-radius: 10px;
+            width: 280px;
+            height: 100px;
+            border: 3px solid #ff0000;
+            border-radius: 5px;
         }
         
         .result-container {
-            margin-top: 20px;
             padding: 10px;
             background-color: #f0f0f0;
             display: none;
+            z-index: 100;
+        }
+        
+        .fullscreen-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 200;
         }
     </style>
 </head>
 <body>
-    <h1>Leitor de Código de Barras e QR</h1>
-    
-    <div class="input-container">
-        <input type="text" id="result-input" placeholder="Resultado aparecerá aqui">
-        <button id="scan-button">Abrir Câmera</button>
-    </div>
-    
-    <div id="scanner-container">
-        <video id="video"></video>
-        <canvas id="canvas"></canvas>
-        <div class="scanner-overlay">
-            <div class="scanner-frame"></div>
+    <div class="container">
+        <div class="input-container">
+            <input type="text" id="result-input" placeholder="Resultado aparecerá aqui">
+            <button id="scan-button">Abrir Câmera</button>
         </div>
-    </div>
-    
-    <div class="result-container" id="result-container">
-        <h3>Resultado:</h3>
-        <p id="result-text"></p>
+        
+        <div id="scanner-container">
+            <video id="video"></video>
+            <canvas id="canvas"></canvas>
+            <div class="scanner-overlay">
+                <div class="scanner-frame"></div>
+            </div>
+            <button class="fullscreen-button" id="fullscreen-button">⛶</button>
+        </div>
+        
+        <div class="result-container" id="result-container">
+            <h3>Resultado:</h3>
+            <p id="result-text"></p>
+        </div>
     </div>
     
     <script>
@@ -104,6 +144,8 @@
         const canvas = document.getElementById('canvas');
         const resultContainer = document.getElementById('result-container');
         const resultText = document.getElementById('result-text');
+        const fullscreenButton = document.getElementById('fullscreen-button');
+        const container = document.querySelector('.container');
         
         // Variáveis de controle
         let scanning = false;
@@ -118,9 +160,16 @@
                     type: "LiveStream",
                     target: video,
                     constraints: {
-                        facingMode: "environment"
+                        facingMode: "environment",
+                        aspectRatio: { min: 1, max: 2 }
                     },
                 },
+                locator: {
+                    patchSize: "medium",
+                    halfSample: true
+                },
+                numOfWorkers: 2,
+                frequency: 10,
                 decoder: {
                     readers: [
                         "code_128_reader",
@@ -196,22 +245,31 @@
             scannerContainer.style.display = 'block';
             scanButton.textContent = 'Parar Câmera';
             
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-                .then(function(mediaStream) {
-                    stream = mediaStream;
-                    video.srcObject = mediaStream;
-                    video.setAttribute("playsinline", true);
-                    video.play();
-                    
-                    // Primeiro tenta com código de barras
-                    scannerMode = 'barcode';
-                    initBarcodeScanner();
-                })
-                .catch(function(err) {
-                    console.error("Erro ao acessar a câmera: ", err);
-                    alert("Não foi possível acessar a câmera. Verifique as permissões.");
-                    stopScanning();
-                });
+            // Solicitar que o navegador vá para tela cheia
+            requestFullscreen(document.documentElement);
+            
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            })
+            .then(function(mediaStream) {
+                stream = mediaStream;
+                video.srcObject = mediaStream;
+                video.setAttribute("playsinline", true);
+                video.play();
+                
+                // Primeiro tenta com código de barras
+                scannerMode = 'barcode';
+                initBarcodeScanner();
+            })
+            .catch(function(err) {
+                console.error("Erro ao acessar a câmera: ", err);
+                alert("Não foi possível acessar a câmera. Verifique as permissões.");
+                stopScanning();
+            });
         }
         
         // Parar escaneamento
@@ -219,6 +277,9 @@
             scanning = false;
             scannerContainer.style.display = 'none';
             scanButton.textContent = 'Abrir Câmera';
+            
+            // Sair do modo tela cheia
+            exitFullscreen();
             
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
@@ -229,6 +290,31 @@
             }
         }
         
+        // Funções para controlar tela cheia de forma compatível com diferentes navegadores
+        function requestFullscreen(element) {
+            if (element.requestFullscreen) {
+                element.requestFullscreen();
+            } else if (element.webkitRequestFullscreen) {
+                element.webkitRequestFullscreen();
+            } else if (element.mozRequestFullScreen) {
+                element.mozRequestFullScreen();
+            } else if (element.msRequestFullscreen) {
+                element.msRequestFullscreen();
+            }
+        }
+        
+        function exitFullscreen() {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.mozCancelFullScreen) {
+                document.mozCancelFullScreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+        }
+        
         // Event listeners
         scanButton.addEventListener('click', function() {
             if (scanning) {
@@ -236,6 +322,22 @@
             } else {
                 startScanning();
             }
+        });
+        
+        fullscreenButton.addEventListener('click', function() {
+            if (document.fullscreenElement) {
+                exitFullscreen();
+            } else {
+                requestFullscreen(document.documentElement);
+            }
+        });
+        
+        // Auto-iniciar em tela cheia quando a página carregar
+        window.addEventListener('load', function() {
+            // Vamos esperar um momento para garantir que o navegador está pronto
+            setTimeout(function() {
+                startScanning();
+            }, 1000);
         });
     </script>
 </body>

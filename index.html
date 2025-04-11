@@ -1,120 +1,241 @@
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Escaneador de Códigos de Barras</title>
-    <!-- Incluindo a biblioteca QuaggaJS via CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <title>Scanner de Código de Barras e QR</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
-            text-align: center;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
         }
-        #video {
+        
+        .input-container {
+            margin-bottom: 20px;
+        }
+        
+        input {
+            padding: 10px;
+            width: 70%;
+        }
+        
+        button {
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        
+        #scanner-container {
+            position: relative;
             width: 100%;
             max-width: 500px;
-            height: auto;
-            position: relative;
+            overflow: hidden;
+            display: none;
         }
-        #result {
-            width: 90%;
-            margin: 10px auto;
-            padding: 10px;
-            font-size: 16px;
+        
+        #video {
+            width: 100%;
         }
-        #startButton {
-            padding: 10px 20px;
-            font-size: 16px;
-            margin: 10px;
+        
+        #canvas {
+            display: none;
         }
-        /* Quadrado de alinhamento */
-        .scan-area {
+        
+        .scanner-overlay {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 80%;
-            height: 20%;
-            border: 2px dashed red;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             pointer-events: none;
+        }
+        
+        .scanner-frame {
+            width: 200px;
+            height: 200px;
+            border: 2px solid #ff0000;
+            border-radius: 10px;
+        }
+        
+        .result-container {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            display: none;
         }
     </style>
 </head>
 <body>
-    <h2>Escaneador de Códigos de Barras</h2>
-    <!-- Campo de texto para o resultado -->
-    <input type="text" id="result" placeholder="Resultado aparecerá aqui" readonly>
-    <!-- Botão para iniciar o escaneamento -->
-    <button id="startButton">Iniciar Escaneamento</button>
-    <!-- Div para o vídeo -->
-    <div id="video" style="position: relative;"></div>
-
+    <h1>Leitor de Código de Barras e QR</h1>
+    
+    <div class="input-container">
+        <input type="text" id="result-input" placeholder="Resultado aparecerá aqui">
+        <button id="scan-button">Abrir Câmera</button>
+    </div>
+    
+    <div id="scanner-container">
+        <video id="video"></video>
+        <canvas id="canvas"></canvas>
+        <div class="scanner-overlay">
+            <div class="scanner-frame"></div>
+        </div>
+    </div>
+    
+    <div class="result-container" id="result-container">
+        <h3>Resultado:</h3>
+        <p id="result-text"></p>
+    </div>
+    
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const resultInput = document.getElementById('result');
-            const startButton = document.getElementById('startButton');
-            let scanning = false;
-
-            // Função para parar o escaneamento
-            function stopScanning() {
-                if (scanning) {
-                    Quagga.stop();
-                    scanning = false;
+        // Elementos do DOM
+        const scanButton = document.getElementById('scan-button');
+        const resultInput = document.getElementById('result-input');
+        const scannerContainer = document.getElementById('scanner-container');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const resultContainer = document.getElementById('result-container');
+        const resultText = document.getElementById('result-text');
+        
+        // Variáveis de controle
+        let scanning = false;
+        let scannerMode = 'barcode'; // 'barcode' ou 'qr'
+        let stream = null;
+        
+        // Inicializar scanner de código de barras (Quagga)
+        function initBarcodeScanner() {
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: video,
+                    constraints: {
+                        facingMode: "environment"
+                    },
+                },
+                decoder: {
+                    readers: [
+                        "code_128_reader",
+                        "ean_reader",
+                        "ean_8_reader",
+                        "code_39_reader",
+                        "code_39_vin_reader",
+                        "codabar_reader",
+                        "upc_reader",
+                        "upc_e_reader",
+                        "i2of5_reader"
+                    ]
+                },
+                locate: true
+            }, function(err) {
+                if (err) {
+                    console.error(err);
+                    alert("Erro ao inicializar o scanner de código de barras. Tentando scanner de QR Code...");
+                    scannerMode = 'qr';
+                    initQRScanner();
+                    return;
                 }
-            }
-
-            // Função para iniciar o escaneamento
-            function startScanning() {
-                if (scanning) return;
-                scanning = true;
-
-                // Configuração do QuaggaJS
-                Quagga.init({
-                    inputStream: {
-                        name: "Live",
-                        type: "LiveStream",
-                        target: document.querySelector('#video'),
-                        constraints: {
-                            facingMode: "environment" // Usa a câmera traseira
-                        }
-                    },
-                    decoder: {
-                        readers: [
-                            "code_39_reader", // Para Code 39
-                            "code_128_reader", // Para Code 128
-                            "ean_reader", // Para EAN-13, EAN-8
-                            "upc_reader" // Para UPC-A, UPC-E
-                        ]
-                    },
-                    locate: true
-                }, function(err) {
-                    if (err) {
-                        console.error('Erro ao iniciar Quagga:', err);
-                        alert('Não foi possível iniciar o escaneador. Verifique as permissões da câmera.');
-                        scanning = false;
-                        return;
+                Quagga.start();
+            });
+            
+            Quagga.onDetected(function(result) {
+                if (result && result.codeResult) {
+                    const code = result.codeResult.code;
+                    processResult(code);
+                }
+            });
+        }
+        
+        // Inicializar scanner de QR code
+        function initQRScanner() {
+            const ctx = canvas.getContext('2d');
+            const tick = function() {
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    canvas.height = video.videoHeight;
+                    canvas.width = video.videoWidth;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    // Tentar encontrar um QR code
+                    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: "dontInvert",
+                    });
+                    
+                    if (code) {
+                        processResult(code.data);
                     }
-                    Quagga.start();
-
-                    // Adiciona o quadrado de alinhamento
-                    if (!document.querySelector('.scan-area')) {
-                        const scanArea = document.createElement('div');
-                        scanArea.className = 'scan-area';
-                        document.querySelector('#video').appendChild(scanArea);
-                    }
-                });
-
-                // Evento de detecção
-                Quagga.onDetected(function(data) {
-                    const code = data.codeResult.code;
-                    resultInput.value = code;
+                }
+                
+                if (scanning) {
+                    requestAnimationFrame(tick);
+                }
+            };
+            
+            tick();
+        }
+        
+        // Processar resultado do scan
+        function processResult(code) {
+            stopScanning();
+            resultInput.value = code;
+            resultText.textContent = code;
+            resultContainer.style.display = 'block';
+        }
+        
+        // Iniciar escaneamento
+        function startScanning() {
+            scanning = true;
+            scannerContainer.style.display = 'block';
+            scanButton.textContent = 'Parar Câmera';
+            
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(function(mediaStream) {
+                    stream = mediaStream;
+                    video.srcObject = mediaStream;
+                    video.setAttribute("playsinline", true);
+                    video.play();
+                    
+                    // Primeiro tenta com código de barras
+                    scannerMode = 'barcode';
+                    initBarcodeScanner();
+                })
+                .catch(function(err) {
+                    console.error("Erro ao acessar a câmera: ", err);
+                    alert("Não foi possível acessar a câmera. Verifique as permissões.");
                     stopScanning();
                 });
+        }
+        
+        // Parar escaneamento
+        function stopScanning() {
+            scanning = false;
+            scannerContainer.style.display = 'none';
+            scanButton.textContent = 'Abrir Câmera';
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
             }
-
-            // Evento do botão
-            startButton.addEventListener('click', startScanning);
+            
+            if (scannerMode === 'barcode') {
+                Quagga.stop();
+            }
+        }
+        
+        // Event listeners
+        scanButton.addEventListener('click', function() {
+            if (scanning) {
+                stopScanning();
+            } else {
+                startScanning();
+            }
         });
     </script>
 </body>

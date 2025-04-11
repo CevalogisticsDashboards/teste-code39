@@ -5,43 +5,69 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Escaneador de Códigos</title>
     <!-- Incluindo a biblioteca ZXing via CDN -->
-    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
 </head>
 <body>
-    <!-- Campo de texto para exibir o resultado ou permitir entrada manual -->
+    <!-- Campo de texto para exibir o resultado -->
     <input type="text" id="result" placeholder="Digite ou escaneie um código">
     <!-- Botão para iniciar o escaneamento -->
     <button id="scanButton">Escanear</button>
     <!-- Elemento de vídeo para exibir o stream da câmera -->
-    <video id="video" width="300" height="200" style="border:1px solid black"></video>
+    <video id="video" width="100%" height="auto" style="border:1px solid black"></video>
 
     <!-- JavaScript embutido -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // Referências aos elementos HTML
             const resultInput = document.getElementById('result');
             const scanButton = document.getElementById('scanButton');
             const videoElement = document.getElementById('video');
+            let codeReader = null;
 
-            // Criando uma instância do leitor de códigos da biblioteca ZXing
-            const codeReader = new ZXing.BrowserMultiFormatReader();
+            // Função para parar o escaneamento
+            function stopScanning() {
+                if (codeReader) {
+                    codeReader.reset();
+                    codeReader = null;
+                }
+            }
 
-            // Adicionando o evento de clique ao botão
-            scanButton.addEventListener('click', () => {
-                // Iniciando o escaneamento a partir da câmera
-                codeReader.decodeFromVideoDevice(undefined, videoElement, (result, err) => {
-                    if (result) {
-                        // Se um código for detectado, exibe o resultado no campo de texto
-                        resultInput.value = result.text;
-                        // Para o escaneamento após encontrar o código
-                        codeReader.reset();
+            // Função para iniciar o escaneamento
+            async function startScanning() {
+                stopScanning(); // Garante que não há escaneamento ativo
+                codeReader = new ZXing.BrowserMultiFormatReader();
+
+                try {
+                    // Tenta usar a câmera traseira (environment)
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                    let deviceId = undefined;
+
+                    // Procura pela câmera traseira
+                    for (const device of videoDevices) {
+                        if (device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('rear')) {
+                            deviceId = device.deviceId;
+                            break;
+                        }
                     }
-                    if (err && !(err instanceof ZXing.NotFoundException)) {
-                        // Loga erros que não sejam "nenhum código encontrado"
-                        console.error(err);
-                    }
-                });
-            });
+
+                    // Inicia o escaneamento
+                    codeReader.decodeFromVideoDevice(deviceId, videoElement, (result, err) => {
+                        if (result) {
+                            resultInput.value = result.text;
+                            stopScanning();
+                        }
+                        if (err && !(err instanceof ZXing.NotFoundException)) {
+                            console.error('Erro:', err);
+                        }
+                    });
+                } catch (err) {
+                    console.error('Erro ao acessar a câmera:', err);
+                    alert('Não foi possível acessar a câmera. Verifique as permissões.');
+                }
+            }
+
+            // Evento do botão
+            scanButton.addEventListener('click', startScanning);
         });
     </script>
 </body>

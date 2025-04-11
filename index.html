@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner de Códigos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-decoder/0.3.3/qrcode-decoder.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+        #scanner-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            overflow: hidden;
+            display: none;
+        }
+        #video-container {
+            width: 100%;
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .drawingBuffer {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .result-message {
+            background-color: #e7f3fe;
+            border-left: 6px solid #2196F3;
+            margin-bottom: 15px;
+            padding: 10px;
+            display: none;
+        }
+        .camera-options {
+            margin-top: 15px;
+            margin-bottom: 20px;
+        }
+        .camera-options select {
+            width: 100%;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        #close-scanner {
+            background-color: #f44336;
+            margin-top: 10px;
+        }
+        #close-scanner:hover {
+            background-color: #e53935;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Scanner de Códigos</h1>
+        
+        <div class="result-message" id="result-message">
+            Código detectado: <span id="result-value"></span>
+        </div>
+        
+        <div class="input-group">
+            <input type="text" id="result-input" placeholder="Resultado do escaneamento..." readonly>
+        </div>
+        
+        <button id="start-scanner">Abrir Câmera</button>
+        
+        <div id="scanner-container">
+            <div class="camera-options">
+                <select id="camera-select">
+                    <option value="">Selecionar câmera...</option>
+                </select>
+            </div>
+            
+            <div id="video-container">
+                <video id="video" autoplay playsinline></video>
+            </div>
+            
+            <button id="close-scanner">Fechar Câmera</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const startButton = document.getElementById('start-scanner');
+            const closeButton = document.getElementById('close-scanner');
+            const scannerContainer = document.getElementById('scanner-container');
+            const resultInput = document.getElementById('result-input');
+            const resultMessage = document.getElementById('result-message');
+            const resultValue = document.getElementById('result-value');
+            const cameraSelect = document.getElementById('camera-select');
+            const videoElement = document.getElementById('video');
+            
+            let stream = null;
+            let qrcodeDecoder = new QrcodeDecoder();
+            let scanning = false;
+            let barcodeDetected = false;
+            
+            // Carregar lista de câmeras
+            async function loadCameras() {
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                    
+                    // Limpar select
+                    cameraSelect.innerHTML = '<option value="">Selecionar câmera...</option>';
+                    
+                    videoDevices.forEach((device, index) => {
+                        const option = document.createElement('option');
+                        option.value = device.deviceId;
+                        option.text = device.label || `Câmera ${index + 1}`;
+                        cameraSelect.appendChild(option);
+                    });
+                    
+                    // Se houver câmeras, selecionar a primeira
+                    if (videoDevices.length > 0) {
+                        cameraSelect.value = videoDevices[0].deviceId;
+                    }
+                } catch (error) {
+                    console.error("Erro ao listar câmeras:", error);
+                }
+            }
+            
+            // Iniciar scanner
+            async function startScanner() {
+                const selectedCamera = cameraSelect.value;
+                const constraints = {
+                    video: {
+                        facingMode: "environment",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                };
+                
+                if (selectedCamera) {
+                    constraints.video.deviceId = { exact: selectedCamera };
+                }
+                
+                try {
+                    // Parar stream anterior se existir
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                    
+                    // Iniciar nova stream
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    videoElement.srcObject = stream;
+                    
+                    // Mostrar container do scanner
+                    scannerContainer.style.display = 'block';
+                    
+                    // Iniciar detecção
+                    startDetection();
+                } catch (error) {
+                    console.error("Erro ao acessar câmera:", error);
+                    alert("Não foi possível acessar a câmera. Verifique as permissões.");
+                }
+            }
+            
+            // Parar scanner
+            function stopScanner() {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
+                scannerContainer.style.display = 'none';
+                scanning = false;
+                
+                if (Quagga.initialized) {
+                    Quagga.stop();
+                }
+            }
+            
+            // Iniciar detecção (alternando entre QR e barcode)
+            function startDetection() {
+                scanning = true;
+                
+                // Primeiro tentar scanner QR
+                scanQR();
+                
+                // Também iniciar scanner de códigos de barras
+                startBarcodeScanner();
+            }
+            
+            // Scanner QR
+            function scanQR() {
+                if (!scanning) return;
+                
+                try {
+                    qrcodeDecoder.decodeFromVideoElement(videoElement)
+                        .then(result => {
+                            if (result && result.data) {
+                                handleScanResult(result.data);
+                            }
+                        })
+                        .catch(error => {
+                            // Ignorar erros de detecção - apenas continuar tentando
+                        })
+                        .finally(() => {
+                            // Continuar escaneando enquanto estiver ativo
+                            if (scanning && !barcodeDetected) {
+                                setTimeout(scanQR, 300);
+                            }
+                        });
+                } catch (error) {
+                    console.error("Erro ao iniciar scanner QR:", error);
+                    if (scanning) {
+                        setTimeout(scanQR, 300);
+                    }
+                }
+            }
+            
+            // Scanner de códigos de barras
+            function startBarcodeScanner() {
+                try {
+                    Quagga.init({
+                        inputStream: {
+                            name: "Live",
+                            type: "LiveStream",
+                            target: videoElement,
+                            constraints: {
+                                width: 640,
+                                height: 480,
+                            }
+                        },
+                        decoder: {
+                            readers: [
+                                "code_128_reader",
+                                "ean_reader",
+                                "ean_8_reader",
+                                "code_39_reader",
+                                "code_39_vin_reader",
+                                "codabar_reader",
+                                "upc_reader",
+                                "upc_e_reader",
+                                "i2of5_reader"
+                            ],
+                            multiple: false
+                        },
+                        locate: true
+                    }, function(err) {
+                        if (err) {
+                            console.error("Erro ao iniciar Quagga:", err);
+                            return;
+                        }
+                        
+                        Quagga.initialized = true;
+                        Quagga.start();
+                        
+                        Quagga.onDetected(function(result) {
+                            if (result && result.codeResult) {
+                                barcodeDetected = true;
+                                handleScanResult(result.codeResult.code);
+                            }
+                        });
+                    });
+                } catch (error) {
+                    console.error("Erro ao iniciar scanner de códigos de barras:", error);
+                }
+            }
+            
+            // Manipular resultado do escaneamento
+            function handleScanResult(code) {
+                if (!code) return;
+                
+                // Parar escanemento
+                stopScanner();
+                
+                // Exibir resultado
+                resultInput.value = code;
+                resultValue.textContent = code;
+                resultMessage.style.display = 'block';
+                
+                // Resetar flag
+                barcodeDetected = false;
+                
+                // Vibrar dispositivo se suportado
+                if (navigator.vibrate) {
+                    navigator.vibrate(100);
+                }
+                
+                // Reproduzir som de beep
+                playBeep();
+            }
+            
+            // Reproduzir som de beep
+            function playBeep() {
+                const beep = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU...");
+                beep.volume = 0.5;
+                beep.play().catch(e => console.log("Não foi possível reproduzir o som"));
+            }
+            
+            // Event Listeners
+            startButton.addEventListener('click', async function() {
+                await loadCameras();
+                startScanner();
+            });
+            
+            closeButton.addEventListener('click', function() {
+                stopScanner();
+            });
+            
+            cameraSelect.addEventListener('change', function() {
+                if (scanning) {
+                    startScanner(); // Reiniciar com nova câmera
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -3,66 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Escaneador de Códigos</title>
-    <!-- Incluindo a biblioteca ZXing via CDN -->
-    <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+    <title>Escaneador de Códigos com Scandit</title>
+    <!-- Incluindo a biblioteca Scandit via CDN -->
+    <script src="https://cdn.scandit.com/sdk/10.x/scandit-web.min.js"></script>
 </head>
 <body>
     <!-- Campo de texto para exibir o resultado -->
     <input type="text" id="result" placeholder="Digite ou escaneie um código">
     <!-- Botão para iniciar o escaneamento -->
     <button id="scanButton">Escanear</button>
-    <!-- Elemento de vídeo para exibir o stream da câmera -->
-    <video id="video" width="100%" height="auto" style="border:1px solid black"></video>
+    <!-- Div para o escaneador Scandit -->
+    <div id="scanner" style="width:100%; height:300px; border:1px solid black;"></div>
 
     <!-- JavaScript embutido -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const resultInput = document.getElementById('result');
             const scanButton = document.getElementById('scanButton');
-            const videoElement = document.getElementById('video');
-            let codeReader = null;
+            let barcodePicker = null;
+
+            // Configuração inicial do Scandit
+            ScanditSDK.configure("SUA_CHAVE_AQUI", {
+                engineLocation: "https://cdn.scandit.com/sdk/10.x/"
+            }).then(() => {
+                console.log("Scandit configurado com sucesso.");
+            }).catch(err => {
+                console.error("Erro na configuração do Scandit:", err);
+                alert("Erro ao configurar o Scandit. Verifique a chave de licença.");
+            });
 
             // Função para parar o escaneamento
             function stopScanning() {
-                if (codeReader) {
-                    codeReader.reset();
-                    codeReader = null;
+                if (barcodePicker) {
+                    barcodePicker.destroy();
+                    barcodePicker = null;
                 }
             }
 
             // Função para iniciar o escaneamento
             async function startScanning() {
                 stopScanning(); // Garante que não há escaneamento ativo
-                codeReader = new ZXing.BrowserMultiFormatReader();
 
                 try {
-                    // Tenta usar a câmera traseira (environment)
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const videoDevices = devices.filter(device => device.kind === 'videoinput');
-                    let deviceId = undefined;
+                    // Cria o BarcodePicker
+                    barcodePicker = await ScanditSDK.BarcodePicker.create(document.getElementById("scanner"), {
+                        playSoundOnScan: true, // Toca som ao escanear
+                        vibrateOnScan: true, // Vibra ao escanear (se suportado)
+                        scanSettings: new ScanditSDK.ScanSettings({
+                            enabledSymbologies: [
+                                "ean8", "ean13", "upca", "upce", "code128", "code39", "code93", "qr", "datamatrix", "pdf417"
+                            ], // Formatos suportados
+                            codeDuplicateFilter: 1000 // Evita leituras duplicadas por 1 segundo
+                        })
+                    });
 
-                    // Procura pela câmera traseira
-                    for (const device of videoDevices) {
-                        if (device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('rear')) {
-                            deviceId = device.deviceId;
-                            break;
-                        }
+                    // Define preferência para câmera traseira
+                    const devices = await ScanditSDK.CameraAccess.getCameras();
+                    const rearCamera = devices.find(device => device.label.toLowerCase().includes("back") || device.label.toLowerCase().includes("rear"));
+                    if (rearCamera) {
+                        barcodePicker.setCamera(rearCamera);
                     }
 
-                    // Inicia o escaneamento
-                    codeReader.decodeFromVideoDevice(deviceId, videoElement, (result, err) => {
-                        if (result) {
-                            resultInput.value = result.text;
-                            stopScanning();
-                        }
-                        if (err && !(err instanceof ZXing.NotFoundException)) {
-                            console.error('Erro:', err);
-                        }
+                    // Evento de escaneamento
+                    barcodePicker.on("scan", (scanResult) => {
+                        const barcodeData = scanResult.barcodes[0].data;
+                        resultInput.value = barcodeData;
+                        stopScanning(); // Para o escaneamento após detectar
                     });
+
+                    // Lida com erros
+                    barcodePicker.on("scanError", (error) => {
+                        console.error("Erro no escaneamento:", error);
+                    });
+
                 } catch (err) {
-                    console.error('Erro ao acessar a câmera:', err);
-                    alert('Não foi possível acessar a câmera. Verifique as permissões.');
+                    console.error("Erro ao iniciar o escaneador:", err);
+                    alert("Não foi possível iniciar o escaneador. Verifique as permissões da câmera.");
                 }
             }
 
